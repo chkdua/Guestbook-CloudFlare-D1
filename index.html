@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Guestbook</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script src="xbbcode.js"></script>
+<link rel="stylesheet" type="text/css" href="xbbcode.css" />
+</head>
+<body class="bg-zinc-900 text-white p-4 min-h-screen flex justify-center">
+
+<div class="w-full max-w-2xl">
+  <h1 class="text-2xl font-bold text-center mb-4">📖 Guestbook</h1>
+
+  <!-- Form Submit -->
+  <form id="guestForm" class="space-y-2 mb-4">
+    <input id="name" placeholder="Nama" class="w-full p-2 rounded bg-zinc-700 border border-zinc-600" required/>
+    <textarea id="message" placeholder="Pesan" class="w-full p-2 rounded bg-zinc-700 border border-zinc-600" required></textarea>
+    <button class="w-full bg-blue-600 hover:bg-blue-700 p-2 rounded font-semibold">Kirim</button>
+    <div id="status" class="text-sm mt-1"></div>
+  </form>
+
+  <!-- Pesan List -->
+  <ul id="list" class="space-y-2 max-h-[60vh] overflow-y-auto"></ul>
+</div>
+
+<script>
+const API = "https://gb.ciu.workers.dev/api/guestbook";
+const list = document.getElementById("list");
+const guestForm = document.getElementById("guestForm");
+const nameInput = document.getElementById("name");
+const messageInput = document.getElementById("message");
+const status = document.getElementById("status");
+
+// Auto Saved name
+const savedName = localStorage.getItem("guest_name");
+if (savedName) { nameInput.value = savedName; }
+nameInput.addEventListener("input", () => { localStorage.setItem("guest_name", nameInput.value); });
+
+// Block XXS
+function escapeHtml(text) {return text.replace(/[&<>"']/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#039;"}[m])); }
+
+// BB Code
+function parseBBCode(text) {
+  text = escapeHtml(text);
+  return XBBCODE.process({
+    text: text,
+    removeMisalignedTags: false,
+    addInLineBreaks: true
+  }).html;
+}
+
+// Show More
+function formatMessage(text, limit = 120) {
+  if (text.length <= limit) return parseBBCode(text);
+  const shortText = parseBBCode(text.slice(0, limit)) + '';
+  const fullText = parseBBCode(text);
+  return `
+    <span class="msg-short">${shortText}</span>
+    <span class="msg-full hidden">${fullText}</span>
+    <span class="text-blue-400 cursor-pointer ml-1 toggle-btn">show more &raquo;</span>
+  `;
+}
+
+// Load pesan terbaru dari API
+async function loadMessages() {
+  const res = await fetch(API+"?page=1&limit=20");
+  const data = await res.json();
+  list.innerHTML = data.map(x=>`
+    <li class="bg-zinc-700 p-3 rounded">
+      <div class="flex font-bold items-center gap-2">
+        <svg width="20px" height="20px" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <path opacity="0.5" d="M22 12C22 17.5228 17.5228 22 12 22C6.47715 22 2 17.5228 2 12C2 6.47715 6.47715 2 12 2C17.5228 2 22 6.47715 22 12Z" fill="#FFFFFF"/>
+          <path d="M16.807 19.0112C15.4398 19.9504 13.7841 20.5 12 20.5C10.2159 20.5 8.56023 19.9503 7.193 19.0111C6.58915 18.5963 6.33109 17.8062 6.68219 17.1632C7.41001 15.8302 8.90973 15 12 15C15.0903 15 16.59 15.8303 17.3178 17.1632C17.6689 17.8062 17.4108 18.5964 16.807 19.0112Z" fill="#FFFFFF"/>
+          <path d="M12 12C13.6569 12 15 10.6569 15 9C15 7.34315 13.6569 6 12 6C10.3432 6 9.00004 7.34315 9.00004 9C9.00004 10.6569 10.3432 12 12 12Z" fill="#FFFFFF"/>
+        </svg>  
+        ${escapeHtml(x.name)}
+      </div>
+      <div class="text-sm text-zinc-300 break-words whitespace-normal w-full">${formatMessage(x.message)}</div>
+      <div class="text-xs text-zinc-500">${new Date(x.created_at).toLocaleString()}</div>
+    </li>
+  `).join("");
+}
+
+// Submit pesan baru
+guestForm.onsubmit = async e => {
+  e.preventDefault();
+  const payload = { name: nameInput.value.trim(), message: messageInput.value.trim() };
+  if(!payload.name || !payload.message) return;
+  status.textContent = "Sending...";
+  const r = await fetch(API, {
+    method:"POST",
+    headers:{"Content-Type":"application/json"},
+    body: JSON.stringify(payload)
+  });
+  const t = await r.text();
+  status.textContent = r.ok ? "✅ Sent" : "❌ "+t;
+  if(r.ok){
+    const li = document.createElement("li");
+    li.className = "bg-zinc-700 p-3 rounded";
+    li.innerHTML = `<div class="font-bold">${escapeHtml(payload.name)}</div>
+                    <div class="text-sm text-zinc-300">${formatMessage(payload.message)}</div>
+                    <div class="text-xs text-zinc-500">${new Date().toLocaleString()}</div>`;
+    list.prepend(li);
+    messageInput.value = "";
+  }
+};
+
+// SSE Realtime: pesan dari user lain
+const evtSource = new EventSource(API+"/stream");
+evtSource.onmessage = e => {
+  const msg = JSON.parse(e.data);
+  const firstChild = list.firstChild;
+  if(firstChild){
+    const firstName = firstChild.querySelector("div.font-bold")?.textContent;
+    const firstMsg = firstChild.querySelector("div.text-sm")?.textContent;
+    if(firstName === msg.name && firstMsg === msg.message) return;
+  }
+  const li = document.createElement("li");
+  li.className = "bg-zinc-700 p-3 rounded";
+  li.innerHTML = `<div class="font-bold">${escapeHtml(msg.name)}</div>
+                  <div class="text-sm text-zinc-300">${formatMessage(msg.message)}</div>
+                  <div class="text-xs text-zinc-500">${new Date(msg.created_at).toLocaleString()}</div>`;
+  list.prepend(li); // newest first
+};
+
+// Toggle Show More / less
+document.addEventListener("click", function(e) {
+  if (e.target.classList.contains("toggle-btn")) {
+    const parent = e.target.parentElement;
+    const shortEl = parent.querySelector(".msg-short");
+    const fullEl = parent.querySelector(".msg-full");
+    if (fullEl.classList.contains("hidden")) {
+      shortEl.classList.add("hidden");
+      fullEl.classList.remove("hidden");
+      e.target.innerHTML = "&laquo; show less";
+    } else {
+      shortEl.classList.remove("hidden");
+      fullEl.classList.add("hidden");
+      e.target.innerHTML = "show more &raquo;";
+    }
+  }
+});
+
+// Load initial messages
+loadMessages();
+</script>
+</body>
+</html>

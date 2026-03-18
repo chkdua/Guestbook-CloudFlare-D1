@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<!--meta name="viewport" content="width=device-width, initial-scale=1.0"-->
+<title>Guestbook Admin</title>
+<script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-zinc-900 text-white p-4 min-h-screen">
+
+<div class="max-w-4xl mx-auto">
+  <div class="overflow-x-auto">
+    <h1 class="text-2xl font-bold mb-4 text-center">🛠️ Guestbook Admin</h1>
+    
+    <!-- Login API Key -->
+    <div id="loginDiv" class="mb-4 w-full">
+      <div class="relative w-full">
+        <input type="password" id="adminKey" placeholder="Admin Token" class="w-full px-3 py-2 pr-10 bg-zinc-800 rounded border border-zinc-600">
+        <button type="button" id="toggleEye" class="absolute right-2 top-1/2 -translate-y-1/2 text-zinc-400">
+        <svg id="eyeIcon" xmlns="http://www.w3.org/2000/svg" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M1 10s4-6 9-6 9 6 9 6-4 6-9 6-9-6-9-6z"/>
+          <circle cx="10" cy="10" r="3"/>
+        </svg>
+        </button>
+      </div>
+      <button id="loginBtn" class="mt-2 bg-blue-600 hover:bg-blue-700 p-2 rounded w-full">
+        Login
+      </button>
+    </div>
+  
+    <!-- Admin Table -->
+    <div id="adminDiv" class="hidden">
+      <button id="deleteSelected" class="mb-2 bg-red-600 hover:bg-red-700 p-2 rounded font-semibold">Delete Selected</button>
+      <div class="max-h-[500px] overflow-y-auto">
+        <table class="w-full border-collapse text-left">
+          <thead class="sticky top-0 bg-zinc-800 z-10">
+            <tr class="border-b border-zinc-600">
+              <th class="p-2 12"><input id="selectAll" type="checkbox"/></th>
+              <th class="p-2 16">ID</th>
+              <th class="p-2 32">Name</th>
+              <th class="p-2" style="align-middle white-space: pre-wrap; word-break: break-word; overflow-wrap: anywhere;">Message</th>
+              <th class="p-2 32">Time</th>
+              <th class="p-2 32">IP</th>
+              <th class="p-2 24">Action</th>
+            </tr>
+          </thead>
+          <tbody id="tableBody"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+const API="https://gb.ciu.workers.dev/api/guestbook"; // Ganti Worker URL
+let apiKey = "";
+const loginDiv = document.getElementById("loginDiv");
+const adminDiv = document.getElementById("adminDiv");
+const tableBody = document.getElementById("tableBody");
+
+// Escape HTML
+function escapeHtml(text){ return text.replace(/[&<>"']/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#039;"}[m])); }
+
+// Input Token
+const input = document.getElementById("adminKey");
+const btn = document.getElementById("toggleEye");
+const icon = document.getElementById("eyeIcon");
+btn.addEventListener("click", () => {
+  if (input.type === "password") {
+    input.type = "text";
+    icon.innerHTML = `
+      <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2">
+        <path d="M3 3l18 18"/>
+        <path d="M10 5c5 0 9 5 9 5a15 15 0 0 1-2.2 3"/>
+        <path d="M6 6a15 15 0 0 0-4 4s4 5 9 5a9 9 0 0 0 3-.5"/>
+        <circle cx="10" cy="10" r="3"/>
+      </svg>
+    `;
+  } else {
+    input.type = "password";
+    icon.innerHTML = `
+      <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2">
+        <path d="M1 10s4-6 9-6 9 6 9 6-4 6-9 6-9-6-9-6z"/>
+        <circle cx="10" cy="10" r="3"/>
+      </svg>
+    `;
+  }
+});
+
+// Login function
+async function doLogin(){
+  apiKey = document.getElementById("adminKey").value.trim();
+  if(!apiKey) return alert("Enter API Key");
+  await loadMessages();
+  loginDiv.classList.add("hidden");
+  adminDiv.classList.remove("hidden");
+}
+
+// Login tombol click
+document.getElementById("loginBtn").onclick = doLogin;
+
+// Enter di input API key
+document.getElementById("adminKey").addEventListener("keypress", e=>{
+  if(e.key === "Enter"){
+    e.preventDefault();
+    doLogin();
+  }
+});
+
+// IP
+function shortIP(ip){ return ip.length > 15 ? ip.slice(0, 15) + "..." : ip; }
+
+// Show More
+function formatMessageAdmin(text, limit = 80) {
+  if (text.length <= limit) return escapeHtml(text);
+  const shortText = escapeHtml(text.slice(0, limit)) + "...";
+  const fullText = escapeHtml(text);
+  return `
+    <span class="msg-short">${shortText}</span>
+    <span class="msg-full hidden">${fullText}</span>
+    <span class="text-blue-400 cursor-pointer ml-1 toggle-btn">show more &raquo;</span>
+  `;
+}
+
+// Load messages
+async function loadMessages() {
+  const res = await fetch(API+"?page=1&limit=100",{ headers: {"X-API-Key": apiKey} });
+  const data = await res.json();
+  tableBody.innerHTML = data.map(x=>`
+    <tr class="border-b border-zinc-600">
+      <td class="p-2 12"><input type="checkbox" class="rowCheckbox" data-id="${x.id}"/></td>
+      <td class="p-2 16">${x.id}</td>
+      <td class="p-2 32">${escapeHtml(x.name)}</td>
+      <td class="p-2" style="white-space: pre-wrap; word-break: break-word; overflow-wrap: anywhere;">${formatMessageAdmin(x.message)}</td>
+      <td class="p-2 32">${new Date(x.created_at).toLocaleString()}</td>
+      <td class="p-2" title="${x.ip}">${shortIP(x.ip)}</td>
+      <td class="p-2 24">
+        <button class="bg-red-600 hover:bg-red-700 p-1 rounded deleteBtn" data-id="${x.id}">Delete</button>
+      </td>
+    </tr>
+  `).join("");
+  document.querySelectorAll(".deleteBtn").forEach(btn=>{
+    btn.onclick = async ()=>{
+      const id = btn.dataset.id;
+      if(!confirm(`Delete message ID ${id}?`)) return;
+      const res = await fetch(API+"/"+id, { method:"DELETE", headers: {"X-API-Key": apiKey} });
+      if(res.ok){
+        alert("Deleted!");
+        await loadMessages();
+      } else {
+        alert(await res.text());
+      }
+    }
+  });
+}
+
+// Select all checkbox
+document.getElementById("selectAll").onclick = function(){
+  const checked = this.checked;
+  document.querySelectorAll(".rowCheckbox").forEach(cb => cb.checked = checked);
+};
+
+// Delete selected
+document.getElementById("deleteSelected").onclick = async () => {
+  const selected = Array.from(document.querySelectorAll(".rowCheckbox:checked")).map(cb => cb.dataset.id);
+  if(selected.length===0) return alert("Select at least one message!");
+  if(!confirm(`Delete ${selected.length} messages?`)) return;
+  for(const id of selected){
+    const res = await fetch(API+"/"+id, { method:"DELETE", headers: {"X-API-Key": apiKey} });
+    if(!res.ok) alert("Failed to delete ID "+id);
+  }
+  await loadMessages();
+};
+
+// Toggle Show More / Less
+document.addEventListener("click", function(e) {
+  if (e.target.classList.contains("toggle-btn")) {
+    const parent = e.target.parentElement;
+    const shortEl = parent.querySelector(".msg-short");
+    const fullEl = parent.querySelector(".msg-full");
+    if (fullEl.classList.contains("hidden")) {
+      shortEl.classList.add("hidden");
+      fullEl.classList.remove("hidden");
+      e.target.innerHTML = "&laquo; show less";
+    } else {
+      shortEl.classList.remove("hidden");
+      fullEl.classList.add("hidden");
+      e.target.innerHTML = "show more &raquo;";
+    }
+  }
+});
+</script>
+
+</body>
+</html>
